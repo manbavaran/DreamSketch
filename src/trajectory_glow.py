@@ -1,7 +1,7 @@
 # trajectory_glow.py
+
 import cv2
 import numpy as np
-import mediapipe as mp
 from collections import deque
 
 palette = [
@@ -19,58 +19,33 @@ def get_grad_color(idx, total):
     t = (ratio * (len(palette) - 1)) % 1.0
     return tuple(np.uint8(color1 * (1 - t) + color2 * t))
 
-def run_trajectory_demo():
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
+class TrajectoryGlow:
+    def __init__(self, max_trail=50):
+        self.trail = deque(maxlen=max_trail)
+        self.active = False  # 글씨쓰기 모드
 
-    MAX_TRAIL = 50
-    trail = deque(maxlen=MAX_TRAIL)
-    cap = cv2.VideoCapture(0)
+    def add_point(self, point):
+        self.trail.append(point)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frame = cv2.flip(frame, 1)
-        h, w = frame.shape[:2]
+    def clear(self):
+        self.trail.clear()
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb)
-
-        if results.multi_hand_landmarks:
-            lm = results.multi_hand_landmarks[0]
-            ix = int(lm.landmark[8].x * w)
-            iy = int(lm.landmark[8].y * h)
-            trail.append((ix, iy))
-
+    def draw(self, frame, brighten=0.0, fade_out=False):
         overlay = frame.copy()
-        for i in range(1, len(trail)):
-            x1, y1 = trail[i-1]
-            x2, y2 = trail[i]
-            color = get_grad_color(i, len(trail))
-            thickness = int(14 * (1 - i / len(trail)) + 6)
-            cv2.line(
-                overlay, (x1, y1), (x2, y2),
-                color, thickness, cv2.LINE_AA
-            )
-
-        if len(trail) > 0:
-            x, y = trail[-1]
-            cv2.circle(overlay, (x, y), 18, (255, 255, 255), -1, cv2.LINE_AA)
-            cv2.circle(overlay, (x, y), 13, (255, 210, 240), -1, cv2.LINE_AA)
-            cv2.circle(overlay, (x, y), 7, (255, 255, 160), -1, cv2.LINE_AA)
-
-        frame = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
-
-        cv2.imshow("Glow Trajectory", frame)
-        key = cv2.waitKey(1)
-        if key == 27:
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+        n = len(self.trail)
+        if n == 0: return frame
+        # 그라데이션 궤적 그리기
+        for i in range(1, n):
+            x1, y1 = self.trail[i-1]
+            x2, y2 = self.trail[i]
+            color = get_grad_color(i, n)
+            thickness = int(14 * (1 - i / n) + 6)
+            alpha = 0.6 + brighten if not fade_out else max(0.2, 0.8*(n-i)/n)
+            cv2.line(overlay, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
+        # 마지막 glow
+        x, y = self.trail[-1]
+        cv2.circle(overlay, (x, y), 18, (255, 255, 255), -1, cv2.LINE_AA)
+        cv2.circle(overlay, (x, y), 13, (255, 210, 240), -1, cv2.LINE_AA)
+        cv2.circle(overlay, (x, y), 7, (255, 255, 160), -1, cv2.LINE_AA)
+        out = cv2.addWeighted(overlay, 0.7 + brighten, frame, 0.3 - brighten, 0)
+        return out

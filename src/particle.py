@@ -1,66 +1,82 @@
 # particle.py
+
 import cv2
 import numpy as np
 import random
 
 class Particle:
-    def __init__(self, x, y, angle, speed, color, size=8, fade=1.0):
+    def __init__(self, x, y, kind="star"):
         self.x = x
         self.y = y
+        angle = random.uniform(-0.6, 0.6)
+        speed = random.uniform(7, 15)
         self.vx = speed * np.cos(angle)
         self.vy = speed * np.sin(angle)
-        self.color = color
-        self.size = size
-        self.alpha = fade  # 1.0~0.0
-        self.life = 1.0    # 1.0~0.0
+        self.size = random.randint(9, 15)
+        self.life = 1.0
+        self.kind = kind
+        self.color = self.choose_color(kind)
+        self.alpha = 1.0
+
+    def choose_color(self, kind):
+        if kind == "heart":
+            return (random.randint(200,255), random.randint(70,120), random.randint(160,240))
+        elif kind == "rose":
+            return (random.randint(210,255), random.randint(70,120), random.randint(100,140))
+        elif kind == "sakura":
+            return (random.randint(240,255), random.randint(160,210), random.randint(220,255))
+        else:
+            return (random.randint(120, 255), random.randint(120,255), random.randint(180,255))
 
     def update(self):
         self.x += self.vx
         self.y += self.vy
-        self.vy += 0.18  # gravity
+        self.vy += 0.17
         self.alpha *= 0.97
-        self.life -= 0.017
+        self.life -= 0.015
 
     def is_alive(self):
-        return self.life > 0.0 and self.alpha > 0.1
+        return self.life > 0.05 and self.alpha > 0.09
 
-def random_color():
-    base = np.array([random.randint(120, 255) for _ in range(3)])
-    return tuple(map(int, base))
+    def draw(self, img):
+        s = int(self.size * self.alpha)
+        color = tuple(int(c * self.alpha + 255 * (1 - self.alpha)) for c in self.color)
+        if self.kind == "heart":
+            pts = self.heart_shape(self.x, self.y, s)
+            cv2.polylines(img, [pts], isClosed=True, color=color, thickness=2)
+            cv2.fillPoly(img, [pts], color)
+        elif self.kind in ("rose", "sakura"):
+            cv2.circle(img, (int(self.x), int(self.y)), s, color, -1, cv2.LINE_AA)
+        else:
+            cv2.circle(img, (int(self.x), int(self.y)), s, color, -1, cv2.LINE_AA)
 
-def run_particle_demo():
-    cap = cv2.VideoCapture(0)
-    particles = []
-    while True:
-        ret, frame = cap.read()
-        if not ret: break
-        frame = cv2.flip(frame, 1)
-        h, w = frame.shape[:2]
+    def heart_shape(self, x, y, s):
+        # 하트 shape (간단 2D path)
+        t = np.linspace(0, 2*np.pi, 100)
+        pts = np.array([
+            (
+                x + s*16*np.sin(tt)**3,
+                y - s*(13*np.cos(tt) - 5*np.cos(2*tt) - 2*np.cos(3*tt) - np.cos(4*tt))
+            ) for tt in t
+        ], dtype=np.int32)
+        return pts
 
-        key = cv2.waitKey(1)
-        if key == ord(' '):
-            for _ in range(20):
-                angle = random.uniform(-0.5, 0.5)
-                speed = random.uniform(8, 15)
-                color = random_color()
-                particles.append(Particle(w//2, h//2, angle, speed, color, size=random.randint(8,13)))
+class ParticleSystem:
+    def __init__(self):
+        self.particles = []
 
+    def emit(self, x, y, n=20, kind="star"):
+        for _ in range(n):
+            self.particles.append(Particle(x, y, kind=kind))
+
+    def update_and_draw(self, frame):
         overlay = frame.copy()
-        new_particles = []
-        for p in particles:
+        next_particles = []
+        for p in self.particles:
             p.update()
             if p.is_alive():
-                alpha = min(1.0, max(0.0, p.alpha))
-                s = int(p.size * alpha)
-                color = [int(c * alpha + 255 * (1 - alpha)) for c in p.color]
-                cv2.circle(overlay, (int(p.x), int(p.y)), s, color, -1, cv2.LINE_AA)
-                new_particles.append(p)
-        particles = new_particles
-
-        frame = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
-        cv2.imshow("Meteor Particle Effect", frame)
-
-        if key == 27:
-            break
-    cap.release()
-    cv2.destroyAllWindows()
+                p.draw(overlay)
+                next_particles.append(p)
+        self.particles = next_particles
+        out = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
+        return out
