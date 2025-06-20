@@ -39,13 +39,11 @@ class MeteorParticle:
         return self.life > 0.04 and self.alpha > 0.09
 
     def draw(self, img):
-        # Trail
         for i in range(1, len(self.trail)):
             x1, y1, a1 = self.trail[i-1]
             x2, y2, a2 = self.trail[i]
             c = tuple(int(a1 * c + (1-a1)*255) for c in self.color)
             cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)), c, 4, cv2.LINE_AA)
-        # Star shape
         draw_star(img, int(self.x), int(self.y), int(self.size), self.color, angle=random.uniform(0, 2*math.pi), thickness=2)
 
 class Particle:
@@ -119,22 +117,26 @@ class ParticleSystem:
         for _ in range(n):
             self.particles.append(Particle(x, y, kind=kind))
 
-    def emit_meteor_fullscreen(self, w, h, direction="right", n_stars=22):
-        for i in range(n_stars):
-            if direction == "right":
-                start_x = random.randint(int(0.02*w), int(0.4*w))
-                start_y = random.randint(int(0.02*h), int(0.33*h))
-                angle = random.uniform(np.radians(62), np.radians(74))
-            else:
-                start_x = random.randint(int(0.6*w), int(0.98*w))
-                start_y = random.randint(int(0.02*h), int(0.33*h))
-                angle = random.uniform(np.radians(106), np.radians(118))
-            speed = random.uniform(18, 28)
-            vx = speed * np.cos(angle)
-            vy = speed * np.sin(angle)
-            size = random.randint(13, 22)
-            color = (255,255,255)
-            self.particles.append(MeteorParticle(start_x, start_y, vx, vy, size, color))
+    def emit_meteor_grid(self, w, h, direction="right", n_col=7, n_row=3):
+        for col in range(n_col):
+            for row in range(n_row):
+                # 별똥별 시작 위치를 더 퍼지게 (±0.08 랜덤)
+                base_x = col / (n_col - 1)
+                base_y = row / (n_row + 1)
+                if direction == "right":
+                    start_x = int(w * (base_x + random.uniform(-0.08, 0.08)))
+                    start_y = int(h * (base_y + random.uniform(-0.06, 0.06)))
+                    angle = np.radians(67 + random.uniform(-3, 3))
+                else:
+                    start_x = int(w * (1 - base_x + random.uniform(-0.08, 0.08)))
+                    start_y = int(h * (base_y + random.uniform(-0.06, 0.06)))
+                    angle = np.radians(113 + random.uniform(-3, 3))
+                speed = random.uniform(20, 25)
+                vx = speed * np.cos(angle)
+                vy = speed * np.sin(angle)
+                size = random.randint(12, 19)
+                color = (255,255,255)
+                self.particles.append(MeteorParticle(start_x, start_y, vx, vy, size, color))
 
     def update_and_draw(self, frame):
         overlay = frame.copy()

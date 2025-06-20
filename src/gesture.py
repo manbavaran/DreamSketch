@@ -42,18 +42,30 @@ def is_heart_gesture(multi_hand_landmarks):
     if not multi_hand_landmarks or len(multi_hand_landmarks) != 2:
         return False
     lm1, lm2 = multi_hand_landmarks
-    scale1 = get_hand_scale(lm1)
-    scale2 = get_hand_scale(lm2)
-    avg_scale = (scale1 + scale2) / 2
-    idx_tip1 = np.array([lm1.landmark[8].x, lm1.landmark[8].y])
-    thb_tip2 = np.array([lm2.landmark[4].x, lm2.landmark[4].y])
-    idx_tip2 = np.array([lm2.landmark[8].x, lm2.landmark[8].y])
-    thb_tip1 = np.array([lm1.landmark[4].x, lm1.landmark[4].y])
-    d1 = np.linalg.norm(idx_tip1 - thb_tip2)
-    d2 = np.linalg.norm(idx_tip2 - thb_tip1)
-    if d1 < avg_scale * 0.32 and d2 < avg_scale * 0.32:
-        return True
-    return False
+    scale1 = np.linalg.norm(lm1.landmark[8].x - lm1.landmark[20].x)
+    scale2 = np.linalg.norm(lm2.landmark[8].x - lm2.landmark[20].x)
+    avg_scale = (scale1 + scale2)/2
+    cx1, cy1 = lm1.landmark[0].x, lm1.landmark[0].y
+    cx2, cy2 = lm2.landmark[0].x, lm2.landmark[0].y
+    center_x = (cx1+cx2)/2
+    y_diff = abs(cy1-cy2)
+    if not (0.25 < center_x < 0.75): return False
+    if y_diff > 0.07: return False
+    v1 = np.array([lm1.landmark[8].x - lm1.landmark[4].x, lm1.landmark[8].y - lm1.landmark[4].y])
+    v2 = np.array([lm2.landmark[8].x - lm2.landmark[4].x, lm2.landmark[8].y - lm2.landmark[4].y])
+    angle = np.arccos(np.dot(v1, v2)/(np.linalg.norm(v1)*np.linalg.norm(v2)+1e-8))
+    if angle > 0.35: return False
+    d1 = np.linalg.norm(np.array([lm1.landmark[8].x, lm1.landmark[8].y]) - np.array([lm1.landmark[4].x, lm1.landmark[4].y]))
+    d2 = np.linalg.norm(np.array([lm2.landmark[8].x, lm2.landmark[8].y]) - np.array([lm2.landmark[4].x, lm2.landmark[4].y]))
+    cross1 = np.linalg.norm(np.array([lm1.landmark[8].x, lm1.landmark[8].y]) - np.array([lm2.landmark[4].x, lm2.landmark[4].y]))
+    cross2 = np.linalg.norm(np.array([lm2.landmark[8].x, lm2.landmark[8].y]) - np.array([lm1.landmark[4].x, lm1.landmark[4].y]))
+    if d1 > scale1*0.53 or d2 > scale2*0.53 or cross1 > avg_scale*0.42 or cross2 > avg_scale*0.42:
+        return False
+    fingers1 = [lm1.landmark[tid].y > lm1.landmark[tid-2].y+scale1*0.012 for tid in [12, 16, 20]]
+    fingers2 = [lm2.landmark[tid].y > lm2.landmark[tid-2].y+scale2*0.012 for tid in [12, 16, 20]]
+    if sum(fingers1) < 2 or sum(fingers2) < 2:
+        return False
+    return True
 
 def is_front_fist(lm):
     scale = get_hand_scale(lm)

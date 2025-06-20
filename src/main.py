@@ -28,7 +28,6 @@ def main():
     ok_since = None
     OK_HOLD_SEC = 0.25
 
-    # 손날 스윕 누적
     sweep_state = {"left": None, "right": None}
     SWEEP_TRIGGER_TIME = 1.5
     SWEEP_MIN_DIST = 0.15
@@ -46,7 +45,7 @@ def main():
         hands_lms = results.multi_hand_landmarks
         t_now = time.time()
 
-        # 글씨쓰기 상태 전이
+        # 글씨쓰기 상태 전이 (손 개수+조건)
         if mode == "idle":
             if hands_lms and len(hands_lms) == 1 and is_ok_sign(hands_lms):
                 if ok_since is None:
@@ -78,45 +77,48 @@ def main():
             particles.emit(ix, iy, n=1, kind="star")
 
         # idle 모드 이펙트
-        if mode == "idle" and hands_lms:
-            # 하트(두 손)
-            if len(hands_lms) == 2:
+        if mode == "idle":
+            # 하트(두 손+하트 제스처만)
+            if hands_lms and len(hands_lms) == 2:
                 if is_heart_gesture(hands_lms) and (t_now - last_heart > 2):
-                    particles.emit(w//2, h//2, n=30, kind="heart")
+                    particles.emit(w//2, h//2, n=40, kind="heart")
                     last_heart = t_now
 
-            # 손날 스윕(1.5초 이상)
-            for idx, lm in enumerate(hands_lms):
-                hand_label = "left" if idx == 0 else "right"
-                cx = lm.landmark[9].x
-                open_palm = all(lm.landmark[tid].y < lm.landmark[tid-2].y for tid in [8,12,16,20])
-                if open_palm:
-                    now = time.time()
-                    if sweep_state[hand_label] is None:
-                        sweep_state[hand_label] = {"start_x": cx, "start_time": now}
+            # 손날 스윕(누적 이동량 기준)
+            if hands_lms:
+                for idx, lm in enumerate(hands_lms):
+                    hand_label = "left" if idx == 0 else "right"
+                    cx = lm.landmark[9].x
+                    open_palm = all(lm.landmark[tid].y < lm.landmark[tid-2].y for tid in [8,12,16,20])
+                    if open_palm:
+                        now = time.time()
+                        if sweep_state[hand_label] is None:
+                            sweep_state[hand_label] = {"x_list": [cx], "start_time": now}
+                        else:
+                            sweep_state[hand_label]["x_list"].append(cx)
+                            dt = now - sweep_state[hand_label]["start_time"]
+                            dx_total = abs(sweep_state[hand_label]["x_list"][-1] - sweep_state[hand_label]["x_list"][0])
+                            if dt > SWEEP_TRIGGER_TIME and dx_total > SWEEP_MIN_DIST:
+                                direction = "right" if (sweep_state[hand_label]["x_list"][-1] - sweep_state[hand_label]["x_list"][0]) > 0 else "left"
+                                if t_now - last_meteor > 1.5:
+                                    particles.emit_meteor_grid(w, h, direction=direction, n_col=17, n_row=7)
+                                    last_meteor = t_now
+                                sweep_state[hand_label] = None
                     else:
-                        dx = cx - sweep_state[hand_label]["start_x"]
-                        dt = now - sweep_state[hand_label]["start_time"]
-                        if dt > SWEEP_TRIGGER_TIME and abs(dx) > SWEEP_MIN_DIST:
-                            direction = "right" if dx > 0 else "left"
-                            if t_now - last_meteor > 1.5:
-                                particles.emit_meteor_fullscreen(w, h, direction=direction, n_stars=22)
-                                last_meteor = t_now
-                            sweep_state[hand_label] = None
-                else:
-                    sweep_state[hand_label] = None
+                        sweep_state[hand_label] = None
 
             # 꽃잎
-            for idx, lm in enumerate(hands_lms):
-                hand_label = "left" if idx == 0 else "right"
-                triggered, new_state = is_fist_palm_flip_seq(lm, prev_flip_state[hand_label])
-                if triggered and (t_now - last_rose > 2):
-                    if hand_label == "left":
-                        particles.emit(int(0.25*w), int(0.7*h), n=24, kind="rose")
-                    elif hand_label == "right":
-                        particles.emit(int(0.75*w), int(0.7*h), n=24, kind="sakura")
-                    last_rose = t_now
-                prev_flip_state[hand_label] = new_state
+            if hands_lms:
+                for idx, lm in enumerate(hands_lms):
+                    hand_label = "left" if idx == 0 else "right"
+                    triggered, new_state = is_fist_palm_flip_seq(lm, prev_flip_state[hand_label])
+                    if triggered and (t_now - last_rose > 2):
+                        if hand_label == "left":
+                            particles.emit(int(0.25*w), int(0.7*h), n=24, kind="rose")
+                        elif hand_label == "right":
+                            particles.emit(int(0.75*w), int(0.7*h), n=24, kind="sakura")
+                        last_rose = t_now
+                    prev_flip_state[hand_label] = new_state
 
         # 효과
         out = frame.copy()
