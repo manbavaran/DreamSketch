@@ -117,6 +117,18 @@ class ParticleSystem:
         for _ in range(n):
             self.particles.append(Particle(x, y, kind=kind))
 
+    def update_and_draw(self, frame):
+        overlay = frame.copy()
+        next_particles = []
+        for p in self.particles:
+            p.update()
+            if p.is_alive():
+                p.draw(overlay)
+                next_particles.append(p)
+        self.particles = next_particles
+        out = cv2.addWeighted(overlay, 0.74, frame, 0.26, 0)
+        return out
+    
     def emit_meteor_grid(self, w, h, direction="right", n_col=7, n_row=3):
         for col in range(n_col):
             for row in range(n_row):
@@ -137,15 +149,12 @@ class ParticleSystem:
                 size = random.randint(12, 19)
                 color = (255,255,255)
                 self.particles.append(MeteorParticle(start_x, start_y, vx, vy, size, color))
+                
+    def emit_flower_burst(self, x, y, kind="rose", n=40, spread=1.2):
+        for i in range(n):
+            angle = 2 * np.pi * i / n + random.uniform(-0.1, 0.1)
+            speed = random.uniform(14, 23) * spread
+            vx = speed * np.cos(angle)
+            vy = speed * np.sin(angle)
+            self.particles.append(Particle(x, y, kind=kind, vx=vx, vy=vy))
 
-    def update_and_draw(self, frame):
-        overlay = frame.copy()
-        next_particles = []
-        for p in self.particles:
-            p.update()
-            if p.is_alive():
-                p.draw(overlay)
-                next_particles.append(p)
-        self.particles = next_particles
-        out = cv2.addWeighted(overlay, 0.74, frame, 0.26, 0)
-        return out
