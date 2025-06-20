@@ -1,8 +1,10 @@
-# main.py
-
 import cv2
 import mediapipe as mp
-from gesture import is_ok_sign, is_index_finger_up, is_fist, is_hand_open, is_heart_gesture
+import time
+from gesture import (
+    is_ok_sign, is_index_finger_up, is_heart_gesture,
+    is_vertical_sweep_gesture, is_fist_palm_flip_seq
+)
 from trajectory_glow import TrajectoryGlow
 from particle import ParticleSystem
 
@@ -11,29 +13,43 @@ def main():
     mp_hands = mp.solutions.hands
     hands = mp_hands.Hands(
         static_image_mode=False, max_num_hands=2,
-        min_detection_confidence=0.5, min_tracking_confidence=0.5
+        min_detection_confidence=0.6, min_tracking_confidence=0.6
     )
-    traj = TrajectoryGlow()
+    traj = TrajectoryGlow(max_trail=120)
     particles = ParticleSystem()
     mode = "idle"
-    idle_timer, finish_timer = 0, 0
-    last_open = {"left":False, "right":False}
-    rose_triggered = sakura_triggered = False
+    fade_stage = None
+    fade_t0 = None
+
+    # 쿨타임용
+    last_heart = 0
+    last_meteor = 0
+    last_rose = 0
+    prev_sweep_x = {"left": None, "right": None}
+    prev_flip_state = {"left": None, "right": None}
+    ok_since = None
+    OK_HOLD_SEC = 0.25
 
     while True:
         ret, frame = cap.read()
         if not ret: break
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
-
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(rgb)
         hands_lms = results.multi_hand_landmarks
+        t_now = time.time()
 
-        # 제스처 인식 (mode 전이)
+        # ---------- 상태 전이 (글씨쓰기용) ----------
         if mode == "idle":
             if is_ok_sign(hands_lms):
-                mode = "ready"
+                if ok_since is None:
+                    ok_since = t_now
+                elif t_now - ok_since > OK_HOLD_SEC:
+                    mode = "ready"
+                    ok_since = None
+            else:
+                ok_since = None
         elif mode == "ready":
             if is_index_finger_up(hands_lms):
                 mode = "draw"
@@ -43,60 +59,75 @@ def main():
         elif mode == "draw":
             if is_ok_sign(hands_lms):
                 mode = "finish"
-                finish_timer = cv2.getTickCount()
+                fade_stage = "brighten"
+                fade_t0 = time.time()
                 traj.active = False
 
-        # 글씨쓰기 모드
+        # ---------- 글씨쓰기 (draw) ----------
         if mode == "draw" and hands_lms:
-            lm = hands_lms[0]  # 한 손만
+            lm = hands_lms[0]
             ix = int(lm.landmark[8].x * w)
             iy = int(lm.landmark[8].y * h)
             traj.add_point((ix, iy))
+            particles.emit(ix, iy, n=1, kind="star")
 
-        # 효과/이펙트 트리거 (파티클/하트/꽃잎)
-        # 손바닥 open (유성우: star), 하트 (heart), 왼손 rose, 오른손 sakura
-        if hands_lms:
-            # 하트(양손)
-            if is_heart_gesture(hands_lms):
-                particles.emit(w//2, h//2, n=10, kind="heart")
-            # 주먹→펴짐(꽃잎)
-            left, right = hands_lms[0], (hands_lms[1] if len(hands_lms)==2 else None)
-            # 왼손 꽃(rose): 주먹후 펴면, 오른손 벚꽃(sakura): 주먹후 펴면
-            for idx, (lm, name) in enumerate(zip([left,right],[ "left", "right"])):
-                if lm:
-                    if is_fist([lm]):
-                        last_open[name] = False
-                    elif is_hand_open([lm]) and not last_open[name]:
-                        if name=="left":
-                            particles.emit(int(0.25*w), int(0.7*h), n=14, kind="rose")
-                        elif name=="right":
-                            particles.emit(int(0.75*w), int(0.7*h), n=14, kind="sakura")
-                        last_open[name] = True
+        # ---------- idle 모드에서만 이펙트 ----------
+        if mode == "idle" and hands_lms:
+            # --- 하트 ---
+            if is_heart_gesture(hands_lms) and (t_now - last_heart > 2):
+                particles.emit(w//2, h//2, n=30, kind="heart")
+                last_heart = t_now
 
-            # 손바닥 open (유성우)
-            for lm in hands_lms:
-                if is_hand_open([lm]):
-                    cx = int(lm.landmark[9].x * w)
-                    cy = int(lm.landmark[9].y * h)
-                    particles.emit(cx, cy, n=2, kind="star")
+            # --- 유성우(손날 스윕) ---
+            for idx, lm in enumerate(hands_lms):
+                hand_label = "left" if idx == 0 else "right"
+                cx = int(lm.landmark[9].x * w)
+                detected = is_vertical_sweep_gesture(lm, prev_sweep_x[hand_label], w)
+                if detected and (t_now - last_meteor > 1.0):
+                    # 스윕 방향으로 유성우 각도 표현 가능 (추후 개선)
+                    particles.emit(cx, int(0.4*h), n=55, kind="star")
+                    last_meteor = t_now
+                prev_sweep_x[hand_label] = cx
 
-        # 효과 적용
-        if mode == "finish":
-            elapsed = (cv2.getTickCount() - finish_timer)/cv2.getTickFrequency()
-            out = traj.draw(frame, brighten=min(1.0, elapsed/1.5))
-            if elapsed > 1.5:
-                out = traj.draw(out, fade_out=True)
-                if elapsed > 3.5:
+            # --- 꽃잎(주먹→손바닥 뒤집기) ---
+            for idx, lm in enumerate(hands_lms):
+                hand_label = "left" if idx == 0 else "right"
+                triggered, new_state = is_fist_palm_flip_seq(lm, prev_flip_state[hand_label])
+                if triggered and (t_now - last_rose > 2):
+                    if hand_label == "left":
+                        particles.emit(int(0.25*w), int(0.7*h), n=24, kind="rose")
+                    elif hand_label == "right":
+                        particles.emit(int(0.75*w), int(0.7*h), n=24, kind="sakura")
+                    last_rose = t_now
+                prev_flip_state[hand_label] = new_state
+
+        # ---------- 글씨/효과 적용 및 fade ----------
+        out = frame.copy()
+        if mode == "draw":
+            out = traj.draw(out, brighten=0.0, fade_out=False)
+        elif mode == "finish":
+            t = time.time() - fade_t0
+            if fade_stage == "brighten":
+                alpha = min(1.0, t / 1.4)
+                out = traj.draw(out, brighten=alpha, fade_out=False)
+                if alpha >= 1.0:
+                    fade_stage = "hold"
+                    fade_t0 = time.time()
+            elif fade_stage == "hold":
+                out = traj.draw(out, brighten=1.0, fade_out=False)
+                if (time.time() - fade_t0) > 1.2:
+                    fade_stage = "fadeout"
+                    fade_t0 = time.time()
+            elif fade_stage == "fadeout":
+                alpha = max(0, 1.0 - (time.time() - fade_t0) / 2.0)
+                out = traj.draw(out, brighten=alpha, fade_out=True)
+                if alpha <= 0:
                     traj.clear()
                     mode = "idle"
-        elif mode == "draw":
-            out = traj.draw(frame)
-        else:
-            out = frame.copy()
+                    fade_stage = None
+                    fade_t0 = None
 
         out = particles.update_and_draw(out)
-
-        # UI
         cv2.putText(out, f"Mode: {mode}", (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (150, 180, 255), 2, cv2.LINE_AA)
         cv2.imshow("DreamSketch", out)
         if cv2.waitKey(1) == 27: break

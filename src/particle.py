@@ -1,5 +1,3 @@
-# particle.py
-
 import cv2
 import numpy as np
 import random
@@ -8,35 +6,43 @@ class Particle:
     def __init__(self, x, y, kind="star"):
         self.x = x
         self.y = y
-        angle = random.uniform(-0.6, 0.6)
-        speed = random.uniform(7, 15)
+        angle = random.uniform(-0.9, 0.9)  # 유성우 각도 다양화
+        speed = random.uniform(8, 18)
         self.vx = speed * np.cos(angle)
         self.vy = speed * np.sin(angle)
-        self.size = random.randint(9, 15)
+        self.size = random.randint(10, 17)
         self.life = 1.0
         self.kind = kind
         self.color = self.choose_color(kind)
         self.alpha = 1.0
+        self.grow = 0.1 if kind == "heart" else 0
 
     def choose_color(self, kind):
         if kind == "heart":
-            return (random.randint(200,255), random.randint(70,120), random.randint(160,240))
+            return (random.randint(210,255), random.randint(70,120), random.randint(160,240))
         elif kind == "rose":
-            return (random.randint(210,255), random.randint(70,120), random.randint(100,140))
+            return (random.randint(230,255), random.randint(70,120), random.randint(100,150))
         elif kind == "sakura":
-            return (random.randint(240,255), random.randint(160,210), random.randint(220,255))
+            return (random.randint(240,255), random.randint(170,220), random.randint(230,255))
         else:
-            return (random.randint(120, 255), random.randint(120,255), random.randint(180,255))
+            # 유성우/별: 랜덤 그라데이션
+            colors = [
+                (255, 255, 180), (200, 160, 255),
+                (120, 220, 255), (255, 180, 210),
+                (255, 240, 120)
+            ]
+            return random.choice(colors)
 
     def update(self):
         self.x += self.vx
         self.y += self.vy
         self.vy += 0.17
         self.alpha *= 0.97
-        self.life -= 0.015
+        self.life -= 0.012
+        self.size += self.grow
 
     def is_alive(self):
-        return self.life > 0.05 and self.alpha > 0.09
+        return self.life > 0.06 and self.alpha > 0.10
 
     def draw(self, img):
         s = int(self.size * self.alpha)
@@ -48,10 +54,10 @@ class Particle:
         elif self.kind in ("rose", "sakura"):
             cv2.circle(img, (int(self.x), int(self.y)), s, color, -1, cv2.LINE_AA)
         else:
+            # 별 유성우
             cv2.circle(img, (int(self.x), int(self.y)), s, color, -1, cv2.LINE_AA)
 
     def heart_shape(self, x, y, s):
-        # 하트 shape (간단 2D path)
         t = np.linspace(0, 2*np.pi, 100)
         pts = np.array([
             (
@@ -65,7 +71,7 @@ class ParticleSystem:
     def __init__(self):
         self.particles = []
 
-    def emit(self, x, y, n=20, kind="star"):
+    def emit(self, x, y, n=22, kind="star"):
         for _ in range(n):
             self.particles.append(Particle(x, y, kind=kind))
 
