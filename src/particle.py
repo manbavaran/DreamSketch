@@ -1,18 +1,64 @@
 import cv2
 import numpy as np
 import random
+import math
 
-class Particle:
-    def __init__(self, x, y, kind="star"):
+def draw_star(img, x, y, size, color, angle=0, thickness=2):
+    pts = []
+    for i in range(5):
+        theta = angle + i * 2 * np.pi / 5
+        r = size
+        sx = x + r * np.sin(theta)
+        sy = y - r * np.cos(theta)
+        pts.append((int(sx), int(sy)))
+    for i in range(5):
+        cv2.line(img, pts[i], pts[(i+2)%5], color, thickness, cv2.LINE_AA)
+
+class MeteorParticle:
+    def __init__(self, x, y, vx, vy, size, color):
         self.x = x
         self.y = y
-        angle = random.uniform(-0.9, 0.9)  # 유성우 각도 다양화
+        self.vx = vx
+        self.vy = vy
+        self.size = size
+        self.color = color
+        self.alpha = 1.0
+        self.trail = []
+        self.life = 1.0
+
+    def update(self):
+        self.trail.append((self.x, self.y, self.alpha))
+        if len(self.trail) > 20:
+            self.trail.pop(0)
+        self.x += self.vx
+        self.y += self.vy
+        self.alpha *= 0.94
+        self.life -= 0.014
+
+    def is_alive(self):
+        return self.life > 0.04 and self.alpha > 0.09
+
+    def draw(self, img):
+        # Trail
+        for i in range(1, len(self.trail)):
+            x1, y1, a1 = self.trail[i-1]
+            x2, y2, a2 = self.trail[i]
+            c = tuple(int(a1 * c + (1-a1)*255) for c in self.color)
+            cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)), c, 4, cv2.LINE_AA)
+        # Star shape
+        draw_star(img, int(self.x), int(self.y), int(self.size), self.color, angle=random.uniform(0, 2*math.pi), thickness=2)
+
+class Particle:
+    def __init__(self, x, y, kind="star", vx=None, vy=None):
+        self.x = x
+        self.y = y
+        self.kind = kind
+        angle = random.uniform(-0.9, 0.9)
         speed = random.uniform(8, 18)
-        self.vx = speed * np.cos(angle)
-        self.vy = speed * np.sin(angle)
+        self.vx = vx if vx is not None else speed * np.cos(angle)
+        self.vy = vy if vy is not None else speed * np.sin(angle)
         self.size = random.randint(10, 17)
         self.life = 1.0
-        self.kind = kind
         self.color = self.choose_color(kind)
         self.alpha = 1.0
         self.grow = 0.1 if kind == "heart" else 0
@@ -25,7 +71,6 @@ class Particle:
         elif kind == "sakura":
             return (random.randint(240,255), random.randint(170,220), random.randint(230,255))
         else:
-            # 유성우/별: 랜덤 그라데이션
             colors = [
                 (255, 255, 180), (200, 160, 255),
                 (120, 220, 255), (255, 180, 210),
@@ -54,8 +99,7 @@ class Particle:
         elif self.kind in ("rose", "sakura"):
             cv2.circle(img, (int(self.x), int(self.y)), s, color, -1, cv2.LINE_AA)
         else:
-            # 별 유성우
-            cv2.circle(img, (int(self.x), int(self.y)), s, color, -1, cv2.LINE_AA)
+            draw_star(img, int(self.x), int(self.y), s, color, angle=random.uniform(0,2*np.pi), thickness=2)
 
     def heart_shape(self, x, y, s):
         t = np.linspace(0, 2*np.pi, 100)
@@ -75,6 +119,23 @@ class ParticleSystem:
         for _ in range(n):
             self.particles.append(Particle(x, y, kind=kind))
 
+    def emit_meteor_fullscreen(self, w, h, direction="right", n_stars=22):
+        for i in range(n_stars):
+            if direction == "right":
+                start_x = random.randint(int(0.02*w), int(0.4*w))
+                start_y = random.randint(int(0.02*h), int(0.33*h))
+                angle = random.uniform(np.radians(62), np.radians(74))
+            else:
+                start_x = random.randint(int(0.6*w), int(0.98*w))
+                start_y = random.randint(int(0.02*h), int(0.33*h))
+                angle = random.uniform(np.radians(106), np.radians(118))
+            speed = random.uniform(18, 28)
+            vx = speed * np.cos(angle)
+            vy = speed * np.sin(angle)
+            size = random.randint(13, 22)
+            color = (255,255,255)
+            self.particles.append(MeteorParticle(start_x, start_y, vx, vy, size, color))
+
     def update_and_draw(self, frame):
         overlay = frame.copy()
         next_particles = []
@@ -84,5 +145,5 @@ class ParticleSystem:
                 p.draw(overlay)
                 next_particles.append(p)
         self.particles = next_particles
-        out = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
+        out = cv2.addWeighted(overlay, 0.74, frame, 0.26, 0)
         return out
