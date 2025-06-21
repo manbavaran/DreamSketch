@@ -3,7 +3,8 @@ import mediapipe as mp
 import time
 from gesture import (
     is_ok_sign, is_ok_released, is_index_finger_up, is_heart_gesture,
-    is_fist_palm_flip_seq
+    is_fist_palm_flip_seq, update_sweep_traj, sweep_traj_distance,
+    sweep_direction, is_palm_open
 )
 from trajectory_glow import TrajectoryGlow
 from particle import ParticleSystem
@@ -22,23 +23,23 @@ def main():
     fade_t0 = None
 
     last_heart = 0
-    last_meteor = 0
-    last_rose = 0
+    last_rose = {"left": 0, "right": 0}
     prev_flip_state = {"left": None, "right": None}
+    ROSE_COOLTIME = 1.1
+
+    sweep_traj = {"left": [], "right": []}
+    last_meteor = 0
+    SWEEP_COOLTIME = 1.6
+    sweeping_until = 0
+
     ok_since = None
     OK_HOLD_SEC = 0.2
-
     ok_just_released_time = None
-    ok_released_window = 2.0  # OK 해제 후 2초 안에 index up 인식 시 draw 진입
-
+    ok_released_window = 2.0
     prev_ok_state = False
 
     ready_since = None
     READY_TIMEOUT = 4.0
-
-    sweep_state = {"left": None, "right": None}
-    SWEEP_TRIGGER_TIME = 1.5
-    SWEEP_MIN_DIST = 0.3
 
     last_gesture_name = ""
     last_gesture_time = 0
@@ -56,19 +57,27 @@ def main():
         results = hands.process(rgb)
         t_now = time.time()
 
-        # --- MediaPipe Handedness 정보 동기화 ---
         hands_info = []
         if results.multi_hand_landmarks and results.multi_handedness:
             for lm, handness in zip(results.multi_hand_landmarks, results.multi_handedness):
-                label = handness.classification[0].label.lower()  # 'left' or 'right'
+                label = handness.classification[0].label.lower()
                 hands_info.append({"lm": lm, "label": label})
 
-        # --- OK 사인 인식, 해제 감지 ---
         curr_ok = len(hands_info) == 1 and is_ok_sign([hands_info[0]["lm"]])
         ok_released = is_ok_released(prev_ok_state, curr_ok)
         prev_ok_state = curr_ok
 
-        # --- 상태머신 ---
+        # draw 모드에서 ok 사인시 finish 전환 (fade out)
+        if mode == "draw":
+            # draw 모드에서는 index up, ok 사인 인식 모두 무시!
+            if curr_ok:
+                mode = "finish"
+                fade_stage = "brighten"
+                fade_t0 = time.time()
+                last_gesture_name = "Finish by OK"
+                last_gesture_time = t_now
+
+        # 상태머신
         if mode == "idle":
             if curr_ok:
                 if ok_since is None:
@@ -82,11 +91,9 @@ def main():
             else:
                 ok_since = None
                 ready_since = None
-            # OK 사인을 해제한 시점 기록 (손가락 바뀔 때)
             if ok_released:
                 ok_just_released_time = t_now
-            # OK 해제 후 일정 시간 이내에 index up → draw 진입
-            if (ok_just_released_time is not None and 
+            if (ok_just_released_time is not None and
                 t_now - ok_just_released_time < ok_released_window and
                 len(hands_info) == 1 and is_index_finger_up([hands_info[0]["lm"]])):
                 mode = "draw"
@@ -96,10 +103,9 @@ def main():
                 last_gesture_time = t_now
 
         elif mode == "ready":
-            # (ready 상태에서는 index up 진입 불필요, OK 해제 감지만 해도 됨)
             if ok_released:
                 ok_just_released_time = t_now
-            if (ok_just_released_time is not None and 
+            if (ok_just_released_time is not None and
                 t_now - ok_just_released_time < ok_released_window and
                 len(hands_info) == 1 and is_index_finger_up([hands_info[0]["lm"]])):
                 mode = "draw"
@@ -115,16 +121,7 @@ def main():
                 ready_since = None
                 ok_just_released_time = None
 
-        elif mode == "draw":
-            if curr_ok:
-                mode = "finish"
-                fade_stage = "brighten"
-                fade_t0 = time.time()
-                traj.active = False
-                last_gesture_name = "OK Sign (Finish)"
-                last_gesture_time = t_now
-
-        # --- 글씨 쓰기: 인덱스 손가락 이동 경로 저장 ---
+        # 글씨 쓰기
         if mode == "draw" and len(hands_info) == 1:
             lm = hands_info[0]["lm"]
             ix = int(lm.landmark[8].x * w)
@@ -132,64 +129,59 @@ def main():
             traj.add_point((ix, iy))
             particles.emit(ix, iy, n=1, kind="star")
 
-        # --- idle 모드: 이펙트 전용 ---
+        # 이펙트/idle
         if mode == "idle":
-            # --- (1) 하트 ---
-            if len(hands_info) == 2:
-                if is_heart_gesture([hands_info[0]["lm"], hands_info[1]["lm"]]) and (t_now - last_heart > 2):
-                    particles.emit(w//2, h//2, n=40, kind="heart")
-                    last_heart = t_now
-                    last_gesture_name = "Heart"
-                    last_gesture_time = t_now
-
-            # --- (2) 손날 스윕 ---
+            sweeping_any = False
             for hand in hands_info:
                 lm = hand["lm"]
-                hand_label = hand["label"]
-                open_palm = all(
-                    lm.landmark[tid].y < lm.landmark[tid-2].y - 0.02
-                    for tid in [8,12,16,20]
-                )
-                if open_palm:
-                    now = time.time()
-                    if sweep_state[hand_label] is None:
-                        sweep_state[hand_label] = {
-                            "x_start": lm.landmark[9].x,
-                            "start_time": now
-                        }
-                    else:
-                        dx = abs(lm.landmark[9].x - sweep_state[hand_label]["x_start"])
-                        dt = now - sweep_state[hand_label]["start_time"]
-                        if dt > SWEEP_TRIGGER_TIME and dx > SWEEP_MIN_DIST:
-                            direction = "right" if (lm.landmark[9].x - sweep_state[hand_label]["x_start"]) > 0 else "left"
-                            if t_now - last_meteor > 1.5:
-                                particles.emit_meteor_grid(w, h, direction=direction, n_col=17, n_row=7)
-                                last_meteor = t_now
-                                last_gesture_name = f"Palm Sweep ({'->' if direction == 'right' else '<-'})"
-                                last_gesture_time = t_now
-                            sweep_state[hand_label] = None
-                else:
-                    sweep_state[hand_label] = None
+                label = hand["label"]
+                palm_open = is_palm_open(lm)
+                sweep_traj[label] = update_sweep_traj(lm, sweep_traj[label], palm_open)
+                if palm_open and sweep_traj_distance(sweep_traj[label]) > 0.33:
+                    dir = sweep_direction(sweep_traj[label])
+                    if t_now - last_meteor > SWEEP_COOLTIME:
+                        if dir in ("right", "left"):
+                            particles.emit_meteor_rain(w, h, direction="dr" if dir == "right" else "dl", n=20)
+                            last_meteor = t_now
+                            sweeping_until = t_now + SWEEP_COOLTIME
+                            last_gesture_name = f"Meteor Shower ({dir})"
+                            last_gesture_time = t_now
+                    sweep_traj[label] = []
+                    sweeping_any = True
+            sweeping_any = sweeping_any or (t_now < sweeping_until)
 
-            # --- (3) 꽃잎(주먹→손바닥 플립) ---
-            for hand in hands_info:
-                lm = hand["lm"]
-                hand_label = hand["label"]
-                triggered, new_state = is_fist_palm_flip_seq(lm, prev_flip_state.get(hand_label))
-                if triggered and (t_now - last_rose > 3.0):
-                    x_pos = int(lm.landmark[9].x * w)
-                    y_pos = int(lm.landmark[9].y * h)
+            # sweeping 쿨타임엔 하트/꽃잎 절대 발생 금지
+            if not sweeping_any:
+                # 하트: 양손 완전 배타
+                if len(hands_info) == 2:
+                    if is_heart_gesture([hands_info[0]["lm"], hands_info[1]["lm"]]) and (t_now - last_heart > 1.0):
+                        particles.emit(w//2, h//2, n=50, kind="heart")
+                        last_heart = t_now
+                        last_gesture_name = "Heart"
+                        last_gesture_time = t_now
+
+                # 꽃잎: 양손 동시 플립도 각각 발생
+                flips = []
+                for hand in hands_info:
+                    lm = hand["lm"]
+                    hand_label = hand["label"]
+                    triggered, new_state = is_fist_palm_flip_seq(lm, prev_flip_state.get(hand_label))
+                    if triggered and (t_now - last_rose[hand_label] > ROSE_COOLTIME):
+                        flips.append(hand_label)
+                    prev_flip_state[hand_label] = new_state
+                for hand_label in flips:
+                    x_pos = int(hands_info[0]["lm"].landmark[9].x * w if hand_label == hands_info[0]["label"] else hands_info[1]["lm"].landmark[9].x * w)
+                    y_pos = int(hands_info[0]["lm"].landmark[9].y * h if hand_label == hands_info[0]["label"] else hands_info[1]["lm"].landmark[9].y * h)
                     if hand_label == "left":
-                        particles.emit_flower_burst(x_pos, y_pos, kind="rose", n=48, spread=1.3)
+                        particles.emit_flower_burst(x_pos, y_pos, kind="rose", n=50, spread=1.3)
                         last_gesture_name = "Petal (Left)"
                     elif hand_label == "right":
-                        particles.emit_flower_burst(x_pos, y_pos, kind="sakura", n=48, spread=1.3)
+                        particles.emit_flower_burst(x_pos, y_pos, kind="sakura", n=50, spread=1.3)
                         last_gesture_name = "Petal (Right)"
-                    last_rose = t_now
+                    last_rose[hand_label] = t_now
                     last_gesture_time = t_now
-                prev_flip_state[hand_label] = new_state
 
-        # --- 효과/렌더링 ---
+        # 렌더링
         out = frame.copy()
         if mode == "draw":
             out = traj.draw(out, brighten=0.0, fade_out=False)
@@ -217,7 +209,6 @@ def main():
 
         out = particles.update_and_draw(out)
 
-        # --- 제스처 이름 표시 ---
         if last_gesture_name and (t_now - last_gesture_time < GESTURE_DISPLAY_DURATION):
             text = f"check: {last_gesture_name}"
             font = cv2.FONT_HERSHEY_SIMPLEX
