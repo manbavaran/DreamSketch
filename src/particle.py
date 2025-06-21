@@ -32,8 +32,8 @@ class Particle:
         self.radius = 12 if kind == "meteor" else random.randint(8, 17)
         self.angle = random.uniform(0, 2*np.pi)
         self.rot_speed = random.uniform(-0.13, 0.13)
-        self.t0 = t0  # 생성 시각
-        self.start_delay = start_delay  # 출발 딜레이
+        self.t0 = t0
+        self.start_delay = start_delay
         self.started = False
 
     def update(self):
@@ -68,9 +68,8 @@ class Particle:
             length = int(self.length * self.alpha)
             x2 = int(x1 - length * np.cos(angle))
             y2 = int(y1 - length * np.sin(angle))
-            # 꼬리: 선분(밝은 흰색 → 페이드 아웃)
-            tail_color = 255
-            steps = 12
+            # 흰색 꼬리: 점점 연해지며 사라지는 선, 검은색 없음!
+            steps = 14
             for i in range(steps):
                 frac0 = i/steps
                 frac1 = (i+1)/steps
@@ -78,9 +77,9 @@ class Particle:
                 sy0 = int(y1*(1-frac0) + y2*frac0)
                 sx1 = int(x1*(1-frac1) + x2*frac1)
                 sy1 = int(y1*(1-frac1) + y2*frac1)
-                color = int(255 * (1-frac0)**2 * self.alpha)
-                color = int(np.clip(color, 80, 255))
-                cv2.line(img, (sx0, sy0), (sx1, sy1), (color, color, color), thickness=2)
+                brightness = int(255 * (1-frac0)**1.6 * self.alpha)
+                brightness = int(np.clip(brightness, 70, 255))
+                cv2.line(img, (sx0, sy0), (sx1, sy1), (brightness, brightness, brightness), thickness=2)
             draw_star(img, (x1, y1), 14, (255,255,255))
         else:
             color = (230, 60, 170) if self.kind == "heart" else (
@@ -156,21 +155,22 @@ class ParticleSystem:
             vy = speed * np.sin(angle)
             self.particles.append(Particle(x, y, kind=kind, vx=vx, vy=vy, t0=time.time()))
 
-    def emit_meteor_rain(self, w, h, direction="dr", n=20):
-        y0 = int(h * 0.05)
+    def emit_meteor_rain(self, w, h, direction="dr", n=22):
+        y0 = int(h * 0.04)
         angle_deg = 66 if direction == "dr" else 114
         angle = np.radians(angle_deg)
+        # 전체 화면을 커버하도록 균등 분포!
         for i in range(n):
             frac = i / (n-1)
             if direction == "dr":
-                x0 = int(w * (0.10 + 0.80 * frac))
+                x0 = int(w * frac)
             else:
-                x0 = int(w * (0.90 - 0.80 * frac))
-            start_delay = random.uniform(0, 0.7) + 0.15 * frac
+                x0 = int(w * (1-frac))
+            start_delay = random.uniform(0, 0.7) + 0.10 * frac
             speed = 25
             vx = speed * np.cos(angle)
             vy = speed * np.sin(angle)
-            self.particles.append(Particle(x0, y0, kind="meteor", vx=vx, vy=vy, length=int(0.6*h), t0=time.time(), start_delay=start_delay))
+            self.particles.append(Particle(x0, y0, kind="meteor", vx=vx, vy=vy, length=int(0.65*h), t0=time.time(), start_delay=start_delay))
 
     def update_and_draw(self, frame):
         new_particles = []

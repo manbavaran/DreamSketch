@@ -42,10 +42,11 @@ def is_heart_gesture(multi_hand_landmarks):
     if not multi_hand_landmarks or len(multi_hand_landmarks) != 2:
         return False
     lm1, lm2 = multi_hand_landmarks
+    # 하트 이미지 참조: 양손 검지/엄지 y 좌표 거의 일치, 서로 근접
     for lm in (lm1, lm2):
         for tid in [8, 12, 16, 20]:
             tip, pip = lm.landmark[tid], lm.landmark[tid-2]
-            if tip.y > pip.y - 0.09:
+            if tip.y > pip.y - 0.10:  # 완전 편 상태만
                 return False
     thumb_dist = np.linalg.norm(
         np.array([lm1.landmark[4].x, lm1.landmark[4].y]) -
@@ -53,10 +54,13 @@ def is_heart_gesture(multi_hand_landmarks):
     index_dist = np.linalg.norm(
         np.array([lm1.landmark[8].x, lm1.landmark[8].y]) -
         np.array([lm2.landmark[8].x, lm2.landmark[8].y]))
-    if thumb_dist > 0.21 or index_dist > 0.24:
+    if thumb_dist > 0.18 or index_dist > 0.21:
         return False
-    if abs(lm1.landmark[0].y - lm2.landmark[0].y) > 0.19:
+    if abs(lm1.landmark[8].y - lm2.landmark[8].y) > 0.10:
         return False
+    if abs(lm1.landmark[4].y - lm2.landmark[4].y) > 0.12:
+        return False
+    # 하트 곡선 각도/대칭은 직접 실험하며 조정 권장!
     return True
 
 def is_front_fist(lm):
