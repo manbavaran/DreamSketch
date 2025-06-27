@@ -123,6 +123,7 @@ class ParticleSystem:
             vy = speed * np.sin(angle)
             self.particles.append(Particle(x, y, vx, vy, 0, time.time(), kind=kind))
 
+
     def emit_meteor_rain(self, w, h, direction="dr", n=22):
         y0 = int(h * 0.04)
         angle_deg = 66 if direction == "dr" or direction == "right" else 114
@@ -135,6 +136,7 @@ class ParticleSystem:
             vx = speed * np.cos(angle)
             vy = speed * np.sin(angle)
             self.particles.append(Particle(x0, y0, vx, vy, length=int(0.8*h), t0=time.time(), kind="meteor", start_delay=start_delay))
+
 
     def update_and_draw(self, frame):
         new_particles = []
