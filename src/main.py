@@ -24,10 +24,6 @@ def main():
     prev_ok_state = False
     sweep_traj_dict = {"left": [], "right": []}
 
-    cv2.namedWindow("DreamSketch", cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty("DreamSketch", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
-    # 쿨타임/길이
     PETAL_COOLTIME = 1.0
     METEOR_COOLTIME = 1.5
     HEART_COOLTIME = 1.0
@@ -38,6 +34,10 @@ def main():
     last_meteor = 0
     last_heart = 0
 
+    cv2.namedWindow("DreamSketch", cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty("DreamSketch", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+    fullscreen = True
     while True:
         ret, frame = cap.read()
         if not ret: break
@@ -57,9 +57,7 @@ def main():
         ok_released = is_ok_released(prev_ok_state, curr_ok)
         prev_ok_state = curr_ok
 
-        # mode 진입 분기(순서 매우 중요!)
         if effect_mode == "idle":
-            # 1. 양손 플립 → 동시 petal
             if len(hands_info) == 2:
                 left_flip, _ = is_fist_palm_flip_seq(hands_info[0]["lm"], prev_flip_state["left"])
                 right_flip, _ = is_fist_palm_flip_seq(hands_info[1]["lm"], prev_flip_state["right"])
@@ -67,7 +65,6 @@ def main():
                     effect_mode = "petal"
                     mode_t0 = t_now
                     last_petal = t_now
-            # 2. 손날 스윕 → meteor
             for hand in hands_info:
                 lm = hand["lm"]
                 label = hand["label"]
@@ -79,20 +76,40 @@ def main():
                         effect_mode = "meteor"
                         mode_t0 = t_now
                         last_meteor = t_now
-            # 3. 양손 하트
             if len(hands_info) == 2:
                 if is_heart_gesture([hands_info[0]["lm"], hands_info[1]["lm"]]) and t_now - last_heart > HEART_COOLTIME:
                     effect_mode = "heart"
                     mode_t0 = t_now
                     last_heart = t_now
-            # 4. draw 모드 진입(OK→index 연계)
             if len(hands_info) == 1 and curr_ok:
+                effect_mode = "ready"
+                mode_t0 = t_now
+        elif effect_mode == "ready":
+            if len(hands_info) == 1 and is_index_finger_up([hands_info[0]["lm"]]):
                 effect_mode = "draw"
                 mode_t0 = t_now
                 traj.clear()
-
+            elif t_now - mode_t0 > 2.2:
+                effect_mode = "idle"
+        elif effect_mode == "draw":
+            if len(hands_info) == 1:
+                lm = hands_info[0]["lm"]
+                ix = int(lm.landmark[8].x * w)
+                iy = int(lm.landmark[8].y * h)
+                traj.add_point((ix, iy))
+            if curr_ok and t_now - mode_t0 > 0.25:
+                effect_mode = "finish"
+                mode_t0 = t_now
+        elif effect_mode == "finish":
+            dt = t_now - mode_t0
+            if dt < FINISH_HOLD:
+                pass
+            elif dt < FINISH_HOLD + FINISH_FADE:
+                pass
+            else:
+                effect_mode = "idle"
+                traj.clear()
         elif effect_mode == "petal":
-            # 양손 위치 각각 burst
             for hand in hands_info:
                 lm = hand["lm"]
                 label = hand["label"]
@@ -102,47 +119,19 @@ def main():
                 else:
                     particles.emit_flower_burst(idx[0], idx[1], kind="sakura", n=60)
             effect_mode = "idle"
-
         elif effect_mode == "meteor":
-            # 유성우 전체 화면 커버
             direction = "dr"
             particles.emit_meteor_rain(w, h, direction=direction, n=22)
             effect_mode = "idle"
-
         elif effect_mode == "heart":
-            # 하트
             particles.emit(w//2, h//2, n=54, kind="heart")
             effect_mode = "idle"
 
-        elif effect_mode == "draw":
-            if len(hands_info) == 1:
-                lm = hands_info[0]["lm"]
-                ix = int(lm.landmark[8].x * w)
-                iy = int(lm.landmark[8].y * h)
-                traj.add_point((ix, iy))
-            # draw모드에서는 ok sign 외에는 finish 안 됨!
-            if curr_ok and t_now - mode_t0 > 0.25:
-                effect_mode = "finish"
-                mode_t0 = t_now
-
-        elif effect_mode == "finish":
-            # finish: hold→fade→idle (매우 짧게)
-            dt = t_now - mode_t0
-            if dt < FINISH_HOLD:
-                pass
-            elif dt < FINISH_HOLD + FINISH_FADE:
-                pass
-            else:
-                effect_mode = "idle"
-                traj.clear()
-
-        # flip state update (항상 마지막에!)
         if len(hands_info) > 0:
             for hand in hands_info:
                 label = hand["label"]
                 _, prev_flip_state[label] = is_fist_palm_flip_seq(hand["lm"], prev_flip_state[label])
 
-        # 렌더링
         out = frame.copy()
         if effect_mode == "draw":
             out = traj.draw(out, brighten=0.0, fade_out=False)
@@ -157,7 +146,15 @@ def main():
 
         cv2.putText(out, f"Mode: {effect_mode}", (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (150, 180, 255), 2, cv2.LINE_AA)
         cv2.imshow("DreamSketch", out)
-        if cv2.waitKey(1) == 27: break
+
+        key = cv2.waitKey(1)
+        if key == 27: break
+        if key == ord('f') or key == ord('F') or key == 0x7a:  # F11 등
+            fullscreen = not fullscreen
+            if fullscreen:
+                cv2.setWindowProperty("DreamSketch", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            else:
+                cv2.setWindowProperty("DreamSketch", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
 
     cap.release()
     cv2.destroyAllWindows()

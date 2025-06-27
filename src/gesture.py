@@ -38,43 +38,44 @@ def is_index_finger_up(multi_hand_landmarks):
             folded += 1
     return is_index_up and folded == 3
 
+# 완전히 배타적인 양손 하트: 모든 손가락이 충분히 구부러지고(편손 NO), 엄지와 검지 끝만 매우 근접
 def is_heart_gesture(multi_hand_landmarks):
     if not multi_hand_landmarks or len(multi_hand_landmarks) != 2:
         return False
     lm1, lm2 = multi_hand_landmarks
-    # 하트 이미지 참조: 양손 검지/엄지 y 좌표 거의 일치, 서로 근접
+    # 모든 손가락이 구부러져야 함 (각 손의 4,8,12,16,20 tip이 pip보다 아래)
     for lm in (lm1, lm2):
-        for tid in [8, 12, 16, 20]:
+        for tid in [4, 8, 12, 16, 20]:
             tip, pip = lm.landmark[tid], lm.landmark[tid-2]
-            if tip.y > pip.y - 0.10:  # 완전 편 상태만
+            if tip.y < pip.y - 0.03:  # tip이 pip보다 아래에 있어야 (충분히 구부림)
                 return False
+    # 엄지 끝과 검지 끝이 서로 근접해야 함
     thumb_dist = np.linalg.norm(
         np.array([lm1.landmark[4].x, lm1.landmark[4].y]) -
         np.array([lm2.landmark[4].x, lm2.landmark[4].y]))
     index_dist = np.linalg.norm(
         np.array([lm1.landmark[8].x, lm1.landmark[8].y]) -
         np.array([lm2.landmark[8].x, lm2.landmark[8].y]))
-    if thumb_dist > 0.18 or index_dist > 0.21:
+    # 거리 임계값 엄격하게
+    if thumb_dist > 0.07 or index_dist > 0.09:
         return False
-    if abs(lm1.landmark[8].y - lm2.landmark[8].y) > 0.10:
-        return False
-    if abs(lm1.landmark[4].y - lm2.landmark[4].y) > 0.12:
-        return False
-    # 하트 곡선 각도/대칭은 직접 실험하며 조정 권장!
+    # 엄지, 검지가 서로 교차/포개어져 있으면 True
     return True
 
 def is_front_fist(lm):
     scale = get_hand_scale(lm)
+    # 4,8,12,16,20 tip이 pip보다 아래: 모두 완전히 구부린 상태
     return all(
         lm.landmark[tid].y > lm.landmark[tid-2].y + scale*0.06
-        for tid in [8,12,16,20]
+        for tid in [4,8,12,16,20]
     )
 
 def is_palm_open(lm):
     scale = get_hand_scale(lm)
+    # 4,8,12,16,20 tip이 pip보다 많이 위: 완전히 편 상태
     return all(
         lm.landmark[tid].y < lm.landmark[tid-2].y - scale*0.09
-        for tid in [8,12,16,20]
+        for tid in [4,8,12,16,20]
     )
 
 def is_fist_palm_flip_seq(lm, prev_state):
