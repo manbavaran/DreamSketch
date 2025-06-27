@@ -124,22 +124,17 @@ class ParticleSystem:
             self.particles.append(Particle(x, y, vx, vy, 0, time.time(), kind=kind))
 
     def emit_meteor_rain(self, w, h, direction="dr", n=22):
-        # 간격 균일: 화면 상단을 n등분하여 x좌표, 시작 y는 고정
         y0 = int(h * 0.04)
-        angle_deg = 66 if direction == "dr" else 114
+        angle_deg = 66 if direction == "dr" or direction == "right" else 114
         angle = np.radians(angle_deg)
         for i in range(n):
-            frac = i / (n-1)
-            if direction == "dr":
-                x0 = int(w * frac)
-            else:
-                x0 = int(w * (1-frac))
-            # 시간차: 전체적으로 퍼짐
+            frac = i / (n - 1)
+            x0 = int(w * frac) if direction in ("dr", "right") else int(w * (1 - frac))
             start_delay = random.uniform(0, 0.7) + 0.10 * frac
             speed = 25
             vx = speed * np.cos(angle)
             vy = speed * np.sin(angle)
-            self.particles.append(Particle(x0, y0, vx, vy, length=int(0.65*h), t0=time.time(), kind="meteor", start_delay=start_delay))
+            self.particles.append(Particle(x0, y0, vx, vy, length=int(0.8*h), t0=time.time(), kind="meteor", start_delay=start_delay))
 
     def update_and_draw(self, frame):
         new_particles = []

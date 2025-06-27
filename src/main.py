@@ -38,6 +38,9 @@ def main():
     cv2.setWindowProperty("DreamSketch", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     fullscreen = True
+    
+    meteor_dir = "dr"  # 초기값: 오른쪽 아래로
+    
     while True:
         ret, frame = cap.read()
         if not ret: break
@@ -58,13 +61,17 @@ def main():
         prev_ok_state = curr_ok
 
         if effect_mode == "idle":
-            if len(hands_info) == 2:
-                left_flip, _ = is_fist_palm_flip_seq(hands_info[0]["lm"], prev_flip_state["left"])
-                right_flip, _ = is_fist_palm_flip_seq(hands_info[1]["lm"], prev_flip_state["right"])
-                if left_flip and right_flip and t_now - last_petal > PETAL_COOLTIME:
+            # ✅ 각 손마다 개별로 fist → palm 전환 감지하여 꽃잎 발사
+            for hand in hands_info:
+                label = hand["label"]
+                lm = hand["lm"]
+                flipped, _ = is_fist_palm_flip_seq(lm, prev_flip_state[label])
+                if flipped and t_now - last_petal > PETAL_COOLTIME:
                     effect_mode = "petal"
                     mode_t0 = t_now
                     last_petal = t_now
+                    break
+                    
             for hand in hands_info:
                 lm = hand["lm"]
                 label = hand["label"]
@@ -74,13 +81,16 @@ def main():
                     dir = sweep_direction(sweep_traj_dict[label])
                     if dir in ("right", "left"):
                         effect_mode = "meteor"
+                        meteor_dir = dir  # <-- 방향 저장
                         mode_t0 = t_now
-                        last_meteor = t_now
+                        last_meteor = t_now             
+                        
             if len(hands_info) == 2:
                 if is_heart_gesture([hands_info[0]["lm"], hands_info[1]["lm"]]) and t_now - last_heart > HEART_COOLTIME:
                     effect_mode = "heart"
                     mode_t0 = t_now
                     last_heart = t_now
+                    
             if len(hands_info) == 1 and curr_ok:
                 effect_mode = "ready"
                 mode_t0 = t_now
@@ -119,12 +129,18 @@ def main():
                 else:
                     particles.emit_flower_burst(idx[0], idx[1], kind="sakura", n=60)
             effect_mode = "idle"
+            
         elif effect_mode == "meteor":
-            direction = "dr"
-            particles.emit_meteor_rain(w, h, direction=direction, n=22)
-            effect_mode = "idle"
+            particles.emit_meteor_rain(w, h, direction=meteor_dir, n=22)
+            effect_mode = "idle"    
+            
         elif effect_mode == "heart":
-            particles.emit(w//2, h//2, n=54, kind="heart")
+            if len(hands_info) == 2:
+                lm1 = hands_info[0]["lm"]
+                lm2 = hands_info[1]["lm"]
+                cx = int(w * (lm1.landmark[9].x + lm2.landmark[9].x) / 2)
+                cy = int(h * (lm1.landmark[9].y + lm2.landmark[9].y) / 2)
+                particles.emit(cx, cy, n=54, kind="heart")
             effect_mode = "idle"
 
         if len(hands_info) > 0:
