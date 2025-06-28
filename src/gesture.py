@@ -14,12 +14,15 @@ def is_ok_sign(multi_hand_landmarks):
     thumb_tip = np.array([lm.landmark[4].x, lm.landmark[4].y])
     index_tip = np.array([lm.landmark[8].x, lm.landmark[8].y])
     d = np.linalg.norm(thumb_tip - index_tip)
+
+    # 세 손가락이 충분히 펴졌는지
     extended = 0
     for tid in [12, 16, 20]:
         tip, pip = lm.landmark[tid], lm.landmark[tid-2]
-        if tip.y < pip.y - scale*0.09:
+        if tip.y < pip.y - scale * 0.12:  # ← 0.09 → 0.12로 더 엄격히
             extended += 1
-    return d < scale * 0.31 and extended == 3
+
+    return d < scale * 0.3 and extended == 3
 
 def is_ok_released(prev_ok, curr_ok):
     return prev_ok and not curr_ok
@@ -62,13 +65,7 @@ def is_heart_gesture(multi_hand_landmarks):
     # 엄지, 검지가 서로 교차/포개어져 있으면 True
     return True
 
-def is_front_fist(lm):
-    scale = get_hand_scale(lm)
-    # 4,8,12,16,20 tip이 pip보다 아래: 모두 완전히 구부린 상태
-    return all(
-        lm.landmark[tid].y > lm.landmark[tid-2].y + scale*0.045
-        for tid in [4,8,12,16,20]
-    )
+
 
 def is_palm_open(lm):
     scale = get_hand_scale(lm)
@@ -78,16 +75,7 @@ def is_palm_open(lm):
         for tid in [4,8,12,16,20]
     )
 
-def is_fist_palm_flip_seq(lm, prev_state):
-    if is_front_fist(lm):
-        now_state = "front_fist"
-    elif is_palm_open(lm):
-        now_state = "palm_open"
-    else:
-        now_state = None
-    if prev_state == "front_fist" and now_state == "palm_open":
-        return True, now_state
-    return False, now_state
+
 
 def update_sweep_traj(lm, prev_traj, palm_open):
     x, y = lm.landmark[9].x, lm.landmark[9].y
@@ -119,3 +107,35 @@ def sweep_direction(traj):
     elif abs(dy) > abs(dx):
         return "down" if dy > 0 else "up"
     return None
+
+
+def is_one_hand_heart(multi_hand_landmarks):
+    if not multi_hand_landmarks or len(multi_hand_landmarks) != 1:
+        return False
+    lm = multi_hand_landmarks[0]
+    scale = get_hand_scale(lm)
+
+    # Tip 좌표
+    thumb = np.array([lm.landmark[4].x, lm.landmark[4].y])
+    index = np.array([lm.landmark[8].x, lm.landmark[8].y])
+    dist = np.linalg.norm(thumb - index)
+
+    # 벡터 각도 (V자 정도 허용)
+    thumb_base = np.array([lm.landmark[2].x, lm.landmark[2].y])
+    index_base = np.array([lm.landmark[5].x, lm.landmark[5].y])
+    v1 = thumb - thumb_base
+    v2 = index - index_base
+    angle = np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6))
+    angle_deg = np.degrees(angle)
+
+    # 접힌 손가락 확인
+    folded = 0
+    for tid in [12, 16, 20]:
+        if lm.landmark[tid].y > lm.landmark[tid - 2].y + scale * 0.03:
+            folded += 1
+
+    # 조건: 손가락 접힘 + 엄지검지 각도 적당함 + 거리 허용
+    return folded >= 2 and dist < scale * 0.28 and 25 <= angle_deg <= 95
+
+
+

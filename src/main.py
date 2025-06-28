@@ -3,8 +3,8 @@ import mediapipe as mp
 import time
 from gesture import (
     is_ok_sign, is_ok_released, is_index_finger_up, is_heart_gesture,
-    is_fist_palm_flip_seq, update_sweep_traj, sweep_traj_distance,
-    sweep_direction, is_palm_open
+    update_sweep_traj, sweep_traj_distance,
+    sweep_direction, is_palm_open, is_one_hand_heart
 )
 from trajectory_glow import TrajectoryGlow
 from particle import ParticleSystem
@@ -20,17 +20,14 @@ def main():
     particles = ParticleSystem()
     effect_mode = "idle"
     mode_t0 = time.time()
-    prev_flip_state = {"left": None, "right": None}
     prev_ok_state = False
     sweep_traj_dict = {"left": [], "right": []}
 
-    PETAL_COOLTIME = 1.0
     METEOR_COOLTIME = 1.5
     HEART_COOLTIME = 1.0
     FINISH_HOLD = 0.4
     FINISH_FADE = 0.7
 
-    last_petal = 0
     last_meteor = 0
     last_heart = 0
 
@@ -61,17 +58,23 @@ def main():
         prev_ok_state = curr_ok
 
         if effect_mode == "idle":
-            # ✅ 각 손마다 개별로 fist → palm 전환 감지하여 꽃잎 발사
+            
+            
             for hand in hands_info:
                 label = hand["label"]
                 lm = hand["lm"]
-                flipped, _ = is_fist_palm_flip_seq(lm, prev_flip_state[label])
-                if flipped and t_now - last_petal > PETAL_COOLTIME:
-                    effect_mode = "petal"
-                    mode_t0 = t_now
-                    last_petal = t_now
-                    break
-                    
+                if is_one_hand_heart([lm]) and t_now - last_heart > HEART_COOLTIME:
+                    # 하트 중심 좌표: 엄지와 검지 사이
+                    x = int((lm.landmark[4].x + lm.landmark[8].x) / 2 * w)
+                    y = int((lm.landmark[4].y + lm.landmark[8].y) / 2 * h)
+
+                    if label == "right":
+                        particles.emit_flower_burst(x, y, kind="sakura", n=60)
+                    else:
+                        particles.emit_flower_burst(x, y, kind="rose", n=60)
+
+                    last_heart = t_now
+            
             for hand in hands_info:
                 lm = hand["lm"]
                 label = hand["label"]
@@ -92,8 +95,11 @@ def main():
                     last_heart = t_now
                     
             if len(hands_info) == 1 and curr_ok:
-                effect_mode = "ready"
-                mode_t0 = t_now
+                lm = hands_info[0]["lm"]
+                if not is_one_hand_heart([lm]):
+                    effect_mode = "ready"
+                    mode_t0 = t_now
+                    
         elif effect_mode == "ready":
             if len(hands_info) == 1 and is_index_finger_up([hands_info[0]["lm"]]):
                 effect_mode = "draw"
@@ -119,16 +125,6 @@ def main():
             else:
                 effect_mode = "idle"
                 traj.clear()
-        elif effect_mode == "petal":
-            for hand in hands_info:
-                lm = hand["lm"]
-                label = hand["label"]
-                idx = int(lm.landmark[9].x * w), int(lm.landmark[9].y * h)
-                if label == "left":
-                    particles.emit_flower_burst(idx[0], idx[1], kind="rose", n=60)
-                else:
-                    particles.emit_flower_burst(idx[0], idx[1], kind="sakura", n=60)
-            effect_mode = "idle"
             
         elif effect_mode == "meteor":
             particles.emit_meteor_rain(w, h, direction=meteor_dir, n=22)
@@ -143,10 +139,6 @@ def main():
                 particles.emit(cx, cy, n=54, kind="heart")
             effect_mode = "idle"
 
-        if len(hands_info) > 0:
-            for hand in hands_info:
-                label = hand["label"]
-                _, prev_flip_state[label] = is_fist_palm_flip_seq(hand["lm"], prev_flip_state[label])
 
         out = frame.copy()
         if effect_mode == "draw":
