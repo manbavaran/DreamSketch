@@ -66,7 +66,7 @@ def is_front_fist(lm):
     scale = get_hand_scale(lm)
     # 4,8,12,16,20 tip이 pip보다 아래: 모두 완전히 구부린 상태
     return all(
-        lm.landmark[tid].y > lm.landmark[tid-2].y + scale*0.06
+        lm.landmark[tid].y > lm.landmark[tid-2].y + scale*0.045
         for tid in [4,8,12,16,20]
     )
 
