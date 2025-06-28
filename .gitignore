@@ -1,3 +1,5 @@
 img/
 
 venv310/
+
+src/__pycache__/
